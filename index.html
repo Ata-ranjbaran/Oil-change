@@ -101,21 +101,12 @@ legend{color:var(--pr);font-weight:700;padding:0 8px}
 .cst-card small{color:var(--mu);display:block}
 .cst-card a{color:var(--pr);text-decoration:none;font-weight:600}
 
-.pin-gate{position:fixed;inset:0;z-index:99999;background:#111827;display:flex;align-items:center;justify-content:center;padding:20px}.pin-card{width:min(360px,100%);background:#fff;color:#111827;border-radius:18px;padding:24px;box-shadow:0 20px 60px #0005;text-align:center}.pin-card input{width:100%;box-sizing:border-box;padding:12px;margin:12px 0;border:1px solid #cbd5e1;border-radius:10px;font-size:1.25rem;text-align:center;letter-spacing:.4em}.pin-card button{width:100%;padding:12px;border:0;border-radius:10px;background:#2563eb;color:white;font-weight:700;cursor:pointer}.pin-error{color:#b91c1c;min-height:1.3em}.cloud-panel{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin:12px 0;display:grid;gap:10px}
+cloud-panel{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin:12px 0;display:grid;gap:10px}
 .cloud-panel h3{margin:0;font-size:1rem}.cloud-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.cloud-fields input{width:100%;min-width:0}.cloud-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.cloud-status{font-size:.9rem;color:var(--mu)}.cloud-status.ok{color:#15803d}.cloud-status.err{color:#b91c1c}.cloud-help{font-size:.84rem;color:var(--mu);margin:0;line-height:1.8}
 
 </style>
 </head>
 <body>
-<div id="pinGate" class="pin-gate">
- <form id="pinForm" class="pin-card">
-  <h2>🔒 ورود به برنامه</h2>
-  <p>برای مشاهده اطلاعات، رمز ۴ رقمی را وارد کن.</p>
-  <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9۰-۹٠-٩]{4}" maxlength="4" placeholder="••••" autocomplete="off" required aria-label="رمز چهار رقمی">
-  <button type="submit">ورود</button>
-  <p id="pinError" class="pin-error"></p>
- </form>
-</div>
 <div class="wrap">
 <header>
 <h1>🛢️ مدیریت تعویض روغن</h1>
@@ -132,14 +123,14 @@ legend{color:var(--pr);font-weight:700;padding:0 8px}
 
 <section class="cloud-panel" aria-label="همگام‌سازی آنلاین">
   <h3>☁️ همگام‌سازی بین گوشی و لپ‌تاپ</h3>
-  <p class="cloud-help">آدرس پروژه و کلید عمومی را در هر دستگاه وارد کن. برنامه بدون ایمیل و حساب کاربری به‌صورت ناشناس وصل می‌شود. کلید Secret یا service_role را هرگز وارد نکن.</p>
+  <p class="cloud-help">آدرس پروژه و کلید عمومی را فقط بار اول در هر مرورگر وارد کن؛ برنامه تنظیمات را ذخیره می‌کند و دفعات بعد خودکار وصل می‌شود. برنامه بدون ایمیل و حساب کاربری به‌صورت ناشناس وصل می‌شود. کلید Secret یا service_role را هرگز وارد نکن.</p>
   <div class="cloud-fields">
     <input id="cloudUrl" type="url" placeholder="Supabase Project URL" dir="ltr" autocomplete="url">
     <input id="cloudKey" type="password" placeholder="Supabase anon / publishable key" dir="ltr" autocomplete="off">
   </div>
   <div class="cloud-actions">
     <button class="btn pr" id="cloudLogin">اتصال و ورود</button>
-    <button class="btn" id="cloudLogout" hidden>خروج از حساب</button>
+    <button class="btn" id="cloudLogout" hidden>قطع اتصال</button>
     <span id="cloudStatus" class="cloud-status">هنوز به دیتابیس وصل نشده‌ای.</span>
   </div>
 </section>
@@ -376,9 +367,15 @@ async function connectCloud(){
  setCloudStatus('در حال اتصال…');
  try{
   cloudClient=window.supabase.createClient(url,key);
-  const {data:authData,error:authError}=await cloudClient.auth.signInAnonymously();
-  if(authError)throw new Error('ورود ناشناس فعال نیست. در Supabase از Authentication → Sign In / Providers، گزینه Anonymous sign-ins را فعال کن. جزئیات: '+authError.message);
-  cloudUser=authData.user;
+  const {data:sessionData,error:sessionError}=await cloudClient.auth.getSession();
+  if(sessionError)throw sessionError;
+  if(sessionData.session){
+   cloudUser=sessionData.session.user;
+  }else{
+   const {data:authData,error:authError}=await cloudClient.auth.signInAnonymously();
+   if(authError)throw new Error('ورود ناشناس فعال نیست. در Supabase از Authentication → Sign In / Providers، گزینه Anonymous sign-ins را فعال کن. جزئیات: '+authError.message);
+   cloudUser=authData.user;
+  }
   const {data:remote,error}=await cloudClient.from('app_data').select('id,cars,fields,customers,updated_at').eq('id',1).maybeSingle();
   if(error)throw error;
   cloudLoading=true;
@@ -664,23 +661,18 @@ themeBtn.onclick=()=>{
  applyTheme(isDark?'light':'dark');
 };
 
-/* ============ قفل ساده ۴ رقمی ============ */
-// رمز ساده برای جلوگیری از باز شدن اتفاقی صفحه است؛ امنیت دیتابیس را تضمین نمی‌کند.
-const APP_PIN='1385'; // برای تغییر رمز، همین مقدار را عوض کن.
-$('#pinForm').addEventListener('submit',e=>{
- e.preventDefault();
- const entered=dig($('#pinInput').value);
- if(entered===APP_PIN){$('#pinGate').remove();}
- else{$('#pinError').textContent='رمز اشتباه است؛ دوباره تلاش کن.';$('#pinInput').value='';$('#pinInput').focus();}
-});
-
 /* ============ راه‌اندازی ============ */
 $('#autoSave').checked=autoSaveMode;
 render();
 renderCustomers();
-// A saved project URL/key are local to each browser; each device signs in separately.
+// Saved URL/key live in each browser. Reconnect automatically on every page load.
 if(load('oil_supabase_url','')&&load('oil_supabase_key','')){
- setCloudStatus('تنظیمات دیتابیس ذخیره است؛ برای همگام‌سازی «اتصال» را بزن.');
+ $('#cloudUrl').value=load('oil_supabase_url','');
+ $('#cloudKey').value=load('oil_supabase_key','');
+ setCloudStatus('تنظیمات ذخیره است؛ اتصال خودکار در حال انجام است…');
+ connectCloud();
+}else{
+ setCloudStatus('برای شروع، آدرس پروژه و کلید عمومی را یک‌بار وارد کن و «اتصال و ورود» را بزن.');
 }
 </script>
 </body>
